@@ -1,0 +1,1 @@
+hadoop jar alsParquet.jar  -Dmapreduce.map.memory.mb=3000 /user/input/ /user/output/
