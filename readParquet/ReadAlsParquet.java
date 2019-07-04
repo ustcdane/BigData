@@ -3,17 +3,20 @@ package readParquet;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map.Entry;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.conf.Configured;
 import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
+import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.io.NullWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.Mapper;
+import org.apache.hadoop.mapreduce.Reducer;
 import org.apache.hadoop.mapreduce.lib.output.TextOutputFormat;
 
 import org.apache.parquet.Log;
@@ -23,10 +26,31 @@ import org.apache.parquet.hadoop.ParquetInputFormat;
 import org.apache.parquet.hadoop.api.DelegatingReadSupport;
 import org.apache.parquet.hadoop.api.InitContext;
 import org.apache.parquet.hadoop.example.GroupReadSupport;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 
+class Hadoop2Util {
+	
+	private static Configuration conf=null;
+	
+	private static final String YARN_RESOURCE="10.129.250.52:8032";
+	private static final String DEFAULT_FS="hdfs://10.129.250.52:9000";
+	
+	public static Configuration getConf(){
+		if(conf==null){
+			conf = new YarnConfiguration();
+			//conf = new Configuration();
+			/*conf.set("fs.defaultFS", DEFAULT_FS);
+			conf.set("mapreduce.framework.name", "yarn");
+			conf.set("yarn.resourcemanager.address", YARN_RESOURCE);
+			*/
+		}
+		return conf;
+	}
+}
 
 public class ReadAlsParquet extends Configured implements Tool {
-	private static final Log LOG = Log.getLog(ReadAlsParquet.class);
+	private static final Logger LOG = LoggerFactory.getLogger(ReadAlsParquet.class);//Log.getLog(ReadAlsParquet.class);
 
 	/*
 	 * Read a Parquet record, write a CSV record
@@ -52,6 +76,19 @@ public class ReadAlsParquet extends Configured implements Tool {
 			context.write(new Text(id), new Text(String.join("\t",list)));
 		}
 	}
+	
+	public static class NormalReducer extends Reducer<Text, Text, Text, Text> {
+
+        public void reduce(Text _key, Iterable<Text> values, Context context) throws IOException, InterruptedException {
+           
+            List<String> list = new ArrayList<>();
+        	for (Text text : values) {
+                //context.write(_key, text);
+        		list.add(text.toString());
+            }
+            context.write(_key, new Text(String.join("\t",list)));
+        }
+    }
 
 	public static final class MyReadSupport extends DelegatingReadSupport<Group> {
         public MyReadSupport() {
@@ -66,7 +103,7 @@ public class ReadAlsParquet extends Configured implements Tool {
 	
 	public int run(String[] args) throws Exception {
 
-		Configuration conf = new Configuration();
+		Configuration conf = config();//new Configuration();
 		
 		/*
 		String readSchema = "message example {\n" +
@@ -84,8 +121,8 @@ public class ReadAlsParquet extends Configured implements Tool {
 		job.setOutputValueClass(Text.class);
 
 		job.setMapperClass(ReadRequestMap.class);
-		job.setNumReduceTasks(0);
-
+		job.setNumReduceTasks(300);
+		job.setReducerClass(NormalReducer.class);
 		 ParquetInputFormat.setReadSupportClass(job, MyReadSupport.class);
 		 
 		//FileInputFormat.setInputPaths(job, new Path(args[0]));
@@ -100,11 +137,24 @@ public class ReadAlsParquet extends Configured implements Tool {
 		job.waitForCompletion(true);
 
 		return 0;
-	}
+	}  
+	
+	public static Configuration  config() {
+		Configuration conf= Hadoop2Util.getConf();
+	      return conf;
+	  }
+	
+	
 
 	public static void main(String[] args) throws Exception {
 		try {
-			int res = ToolRunner.run(new Configuration(), new ReadAlsParquet(), args);
+				Configuration conf = config();
+				LOG.info("args is:\n" + StringUtils.join(args, " "));
+				LOG.info("config is:\n");
+				/*for (Entry<String, String> entry : conf) {
+					LOG.info("%s=%s\n", entry.getKey(), entry.getValue());
+				}*/
+			int res = ToolRunner.run(conf, new ReadAlsParquet(), args);
 			System.exit(res);
 		} catch (Exception e) {
 			e.printStackTrace();
